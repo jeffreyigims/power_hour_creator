@@ -27,7 +27,7 @@ class Track:
     title = attr.ib()
     length = attr.ib()
     full_song = attr.ib(default=False)
-    _start_time = attr.ib(convert=Decimal, default=DEFAULT_START_TIME)
+    _start_time = attr.ib(converter=Decimal, default=DEFAULT_START_TIME)
 
     @property
     def start_time(self):
@@ -243,6 +243,9 @@ class CreatePowerHourService:
         try:
             self._download_and_prepare_each_file(media_files, processor)
             self._normalize_audio(media_files)
+            [processor._convert_video_to_correct_attributes(file) for file in media_files]
+            for file in media_files:
+                print(processor._frame_rate_and_resolution_are_correct(file))
             self._merge_files_into_power_hour(media_files, processor)
 
         except subprocess.CalledProcessError as e:
@@ -399,18 +402,23 @@ class VideoProcessor(MediaProcessor):
         scale_string = 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1:1'
         filter_strings = []
 
-        for index in range(len(output_files)):
+        for index in range(len(output_files)*2):
             filter_strings.append('[{}:v]{}[v{}];'.format(index, scale_string, index))
 
-        for index in range(len(output_files)):
+        for index in range(len(output_files)*2):
             filter_strings.append('[v{}][{}:a:0]'.format(index, index))
 
-        filter_complex = '{} concat=n={}:v=1:a=1 [v] [a]'.format(' '.join(filter_strings), len(output_files))
+        filter_complex = '{} concat=n={}:v=1:a=1 [v] [a]'.format(' '.join(filter_strings), len(output_files)*2)
 
         input_directives = []
-        for file in output_files:
+        for i in range(len(output_files)*2):
             input_directives.append('-i')
-            input_directives.append(file)
+            if i % 2 == 0: 
+                file = os.path.abspath("./assets/videos/normalized-intermission.mp4")
+                input_directives.append(file)
+            else: 
+                file = output_files[i//2]
+                input_directives.append(file)
 
         cmd = [
             ffmpeg_exe(),
@@ -461,7 +469,7 @@ class VideoProcessor(MediaProcessor):
             '-r', '30',
             '-preset', 'faster',
             '-nostdin',
-            media_file.output_path
+            media_file.download_path
         ]
 
         self._logger.debug('Resizing and correcting video {} with command: {}'.format(media_file.track_title, ' '.join(cmd)))
@@ -500,7 +508,8 @@ class VideoProcessor(MediaProcessor):
 
 
 def normalize_audio(media_files):
-    build_audio_normalizer(output_paths=[f.output_path for f in media_files]).run()
+    file = os.path.abspath("./assets/videos/intermission.mp4")
+    build_audio_normalizer(output_paths=[f.output_path for f in media_files]+[file]).run()
 
     for media_file in media_files:
         shutil.copyfile(src=media_file.normalized_path, dst=media_file.output_path)
